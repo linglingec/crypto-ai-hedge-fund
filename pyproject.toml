@@ -2,7 +2,7 @@
 name = "crypto-ai-hedge-fund"
 version = "0.1.0"
 description = "Agent-based automated cryptocurrency trading & risk management (educational, reproducible)."
-authors = ["Egor Fadeev efadeev3@gmail.com"]
+authors = {name = "Egor Fadeev", email = "efadeev3@gmail.com"}
 readme = "README.md"
 packages = [{ include = "src" }]
 
