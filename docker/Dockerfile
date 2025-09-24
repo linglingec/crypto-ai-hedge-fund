@@ -21,7 +21,15 @@ RUN pip install --no-cache-dir jupyter ipykernel
 # now copy the rest of the project (code, notebooks, data)
 COPY . .
 
+# права на entrypoint
+RUN chmod +x docker/entrypoint.sh
+
 ENV PYTHONPATH=/app
 
 EXPOSE 8888
-CMD ["python", "-m", "notebook", "--ip=0.0.0.0", "--allow-root", "--NotebookApp.token="]
+EXPOSE 8000
+
+ENTRYPOINT ["docker/entrypoint.sh"]
+CMD []
+
+# CMD ["python", "-m", "notebook", "--ip=0.0.0.0", "--allow-root", "--NotebookApp.token="]
