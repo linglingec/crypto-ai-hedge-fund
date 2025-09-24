@@ -1,28 +1,23 @@
-"""
-CCXT-based OHLCV ingestion for real exchanges with normalization to the
-project's canonical schema: date, symbol, open, high, low, close, volume.
-
-Public market data only (no credentials required). Suitable for spot pairs.
-"""
 from __future__ import annotations
 from dataclasses import dataclass
-from typing import Optional, List
+from typing import Optional
 import time
 import ccxt
 import pandas as pd
 from dateutil import parser as dateparser
+from pathlib import Path
 
 CANON_COLS = ["date", "symbol", "open", "high", "low", "close", "volume"]
 
 @dataclass
 class FetchSpec:
     exchange_id: str = "binance"
-    symbol: str = "BTC/USDT"         # ccxt format
-    timeframe: str = "1d"            # ccxt timeframe (e.g., 1h, 4h, 1d)
-    since: Optional[str] = None      # ISO8601, e.g. "2023-01-01"
-    until: Optional[str] = None      # ISO8601, default now
-    limit: int = 1000                # ccxt page size (max usually 1000)
-    save_path: Optional[str] = None  # CSV path; if None, derive automatically
+    symbol: str = "BTC/USDT"         # ccxt формат
+    timeframe: str = "1d"
+    since: Optional[str] = None      # ISO8601
+    until: Optional[str] = None
+    limit: int = 1000
+    save_path: Optional[str] = None  # если None ⇒ data/real/<...>.csv
 
 def _exchange(spec: FetchSpec):
     if not hasattr(ccxt, spec.exchange_id):
@@ -36,18 +31,13 @@ def _exchange(spec: FetchSpec):
     return ex
 
 def _to_ms(dt_iso: Optional[str]) -> Optional[int]:
-    if dt_iso is None:
-        return None
+    if dt_iso is None: return None
     return int(dateparser.parse(dt_iso).timestamp() * 1000)
 
-def _canon_symbol(ccxt_symbol: str) -> str:
-    # "BTC/USDT" -> "BTCUSDT"
-    return ccxt_symbol.replace("/", "").upper()
+def canon_symbol(ccxt_symbol: str) -> str:
+    return ccxt_symbol.replace("/", "").upper()  # "BTC/USDT" -> "BTCUSDT"
 
 def fetch_ohlcv(spec: FetchSpec) -> pd.DataFrame:
-    """
-    Pull paginated OHLCV and return canonical dataframe.
-    """
     ex = _exchange(spec)
     since_ms = _to_ms(spec.since) or ex.parse8601("2017-01-01T00:00:00Z")
     until_ms = _to_ms(spec.until) or int(time.time() * 1000)
@@ -58,11 +48,9 @@ def fetch_ohlcv(spec: FetchSpec) -> pd.DataFrame:
 
     while since_ms < until_ms:
         batch = ex.fetch_ohlcv(spec.symbol, timeframe=spec.timeframe, since=since_ms, limit=spec.limit)
-        if not batch:
-            break
+        if not batch: break
         all_rows.extend(batch)
         last_ts = batch[-1][0]
-        # сдвигаем дальше на 1 мс, чтобы не дублировать последнюю свечу
         since_ms = max(last_ts + 1, since_ms + step_ms)
 
     if not all_rows:
@@ -70,30 +58,20 @@ def fetch_ohlcv(spec: FetchSpec) -> pd.DataFrame:
 
     df = pd.DataFrame(all_rows, columns=["timestamp", "open", "high", "low", "close", "volume"])
     df["date"] = pd.to_datetime(df["timestamp"], unit="ms", utc=True).dt.tz_convert(None)
-    df["symbol"] = _canon_symbol(spec.symbol)
+    df["symbol"] = canon_symbol(spec.symbol)
     df = df[CANON_COLS].dropna().sort_values("date").reset_index(drop=True)
     return df
 
+def default_path(spec: FetchSpec) -> Path:
+    return Path("data/real") / f"{spec.exchange_id}_{canon_symbol(spec.symbol)}_{spec.timeframe}.csv"
+
 def save_csv(df: pd.DataFrame, spec: FetchSpec) -> str:
-    """
-    Save to data/real/<exchange>_<SYMBOL>_<timeframe>.csv (or custom path).
-    If file exists, merge, de-duplicate by date, and sort.
-    """
-    import os
-    from pathlib import Path
-
-    if spec.save_path:
-        out = Path(spec.save_path)
-    else:
-        out = Path("data/real") / f"{spec.exchange_id}_{_canon_symbol(spec.symbol)}_{spec.timeframe}.csv"
-
+    out = Path(spec.save_path) if spec.save_path else default_path(spec)
     out.parent.mkdir(parents=True, exist_ok=True)
     if out.exists():
         old = pd.read_csv(out, parse_dates=["date"])
         merged = pd.concat([old, df], ignore_index=True)
-        merged = (merged.drop_duplicates(subset=["date"])
-                        .sort_values("date")
-                        .reset_index(drop=True))
+        merged = merged.drop_duplicates(subset=["date"]).sort_values("date").reset_index(drop=True)
         merged.to_csv(out, index=False)
     else:
         df.to_csv(out, index=False)
