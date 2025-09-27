@@ -62,18 +62,14 @@ def _apply_guardian(guardian, equity: pd.Series, w: pd.Series,
     If RiskGuardian present, try to apply; otherwise conservative local checks.
     """
     log = {}
-    if guardian is not None:
+    if guardian is not None and hasattr(guardian, "adjust_positions"):
         try:
-            res = guardian.apply(weights=w, equity=equality, returns=hist)  # might not match
-        except Exception:
-            # try more generic names
-            try:
-                res = guardian.guard(w, equity, hist)
-            except Exception:
-                res = None
-        if isinstance(res, dict):
-            w = _to_series(res.get("weights", w), w.index)
-            log.update({k: v for k, v in res.items() if k != "weights"})
+            w_adj = guardian.adjust_positions(w, equity)
+            if isinstance(w_adj, pd.Series):
+                w = w_adj.reindex(w.index).fillna(0.0)
+                log["rg_applied"] = True
+        except Exception as e:
+            log["rg_error"] = str(e)
 
     # built-in safety net
     # 1) MDD kill-switch -> move to cash
